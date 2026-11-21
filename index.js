@@ -23,7 +23,7 @@ const STAFF_ROLE_IDS = (process.env.STAFF_ROLE_IDS || '')
 
 const TIKTOK_HANDLES = ['baratheonmc_', 'shahemsettin', 'arzolkk'];
 const YOUTUBE_HANDLE = 'ArzoLX';
-const POLL_INTERVAL_MS = 3 * 60 * 1000; // 3 dakikada bir kontrol
+const POLL_INTERVAL_MS = 3 * 60 * 1000;
 
 if (!TOKEN) {
   console.error('TOKEN ortam değişkeni eksik.');
@@ -314,7 +314,6 @@ async function checkSocialNotifications() {
     const firstRun = !db._notifications.initialized;
     let stateChanged = false;
 
-    // 1. YouTube kontrolü
     let ytVideos = [];
     try {
       const channelId = await resolveYouTubeChannelId(YOUTUBE_HANDLE);
@@ -350,7 +349,6 @@ async function checkSocialNotifications() {
       }
     }
 
-    // 2. TikTok kontrolü
     for (const handle of TIKTOK_HANDLES) {
       let ttVideos = [];
       try {
@@ -448,11 +446,11 @@ const commands = [
     .addUserOption(o => userOpt(o, 'Geçmişi görüntülenecek üye')),
   new SlashCommandBuilder()
     .setName('bildirim-gonder')
-    .setDescription('Bildirim kanalına manuel YouTube veya TikTok bildirimi gönderir.')
+    .setDescription('Manuel YouTube veya TikTok bildirimi gönderir.')
     .addStringOption(o =>
       o
         .setName('platform')
-        .setDescription('İçerik platformu')
+        .setDescription('Platform')
         .setRequired(true)
         .addChoices(
           { name: 'YouTube', value: 'youtube' },
@@ -462,19 +460,19 @@ const commands = [
     .addStringOption(o =>
       o
         .setName('baglanti')
-        .setDescription('Video bağlantısı (https://...)')
+        .setDescription('Video baglantisi')
         .setRequired(true)
     )
     .addStringOption(o =>
       o
         .setName('baslik')
-        .setDescription('İsteğe bağlı video/bildirim başlığı')
+        .setDescription('Baslik')
         .setRequired(false)
     )
     .addStringOption(o =>
       o
-        .setName('kanal_adi')
-        .setDescription('İsteğe bağlı kanal veya profil adı (örn. @ArzoLX)')
+        .setName('kanal')
+        .setDescription('Kanal veya profil adi')
         .setRequired(false)
     )
 ].map(c => c.toJSON());
@@ -499,7 +497,7 @@ async function onBotReady(readyClient) {
     } else {
       await rest.put(Routes.applicationCommands(readyClient.user.id), { body: commands });
     }
-    console.log('Slash komutları yüklendi.');
+    console.log(`Slash komutları yüklendi (${commands.length} adet).`);
   } catch (err) {
     console.error('Slash komut hatası:', err);
   }
@@ -512,7 +510,6 @@ async function onBotReady(readyClient) {
   }
 }
 
-client.once('clientReady', onBotReady);
 client.once('ready', onBotReady);
 
 client.on('messageCreate', async message => {
@@ -547,7 +544,7 @@ client.on('interactionCreate', async interaction => {
       const platform = interaction.options.getString('platform');
       const url = interaction.options.getString('baglanti').trim();
       const customTitle = interaction.options.getString('baslik')?.trim() || '';
-      const customChannel = interaction.options.getString('kanal_adi')?.trim() || '';
+      const customChannel = interaction.options.getString('kanal')?.trim() || '';
 
       if (!isValidHttpUrl(url)) {
         return await interaction.reply({
