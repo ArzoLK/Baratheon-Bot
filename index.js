@@ -154,7 +154,7 @@ async function sendLog(guild, title, fields) {
         }))
       )
       .setTimestamp();
-    await channel.send({ embeds: [embed] });
+    await channel.send({ embeds: [embed], allowedMentions: { parse: [] } });
   } catch (err) {
     console.error('Log gönderilemedi:', err.message);
   }
@@ -189,6 +189,32 @@ function decodeXmlEntities(str = '') {
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'");
+}
+
+function extractYouTubeVideoId(urlStr = '') {
+  try {
+    const u = new URL(urlStr);
+    if (u.hostname.includes('youtu.be')) {
+      return u.pathname.replace(/^\/+/, '').split('/')[0] || '';
+    }
+    if (u.hostname.includes('youtube.com')) {
+      if (u.searchParams.get('v')) return u.searchParams.get('v');
+      const shortsMatch = u.pathname.match(/^\/shorts\/([a-zA-Z0-9_-]+)/);
+      if (shortsMatch?.[1]) return shortsMatch[1];
+    }
+  } catch {
+    // Geçersiz URL durumunda boş dön
+  }
+  return '';
+}
+
+function isValidHttpUrl(urlStr = '') {
+  try {
+    const u = new URL(urlStr);
+    return u.protocol === 'https:' || u.protocol === 'http:';
+  } catch {
+    return false;
+  }
 }
 
 async function resolveYouTubeChannelId(handle) {
@@ -419,7 +445,38 @@ const commands = [
   new SlashCommandBuilder()
     .setName('tik-gecmisi')
     .setDescription('Üyenin tik işlem geçmişini gösterir.')
-    .addUserOption(o => userOpt(o, 'Geçmişi görüntülenecek üye'))
+    .addUserOption(o => userOpt(o, 'Geçmişi görüntülenecek üye')),
+  new SlashCommandBuilder()
+    .setName('bildirim-gonder')
+    .setDescription('Bildirim kanalına manuel YouTube veya TikTok bildirimi gönderir.')
+    .addStringOption(o =>
+      o
+        .setName('platform')
+        .setDescription('İçerik platformu')
+        .setRequired(true)
+        .addChoices(
+          { name: 'YouTube', value: 'youtube' },
+          { name: 'TikTok', value: 'tiktok' }
+        )
+    )
+    .addStringOption(o =>
+      o
+        .setName('baglanti')
+        .setDescription('Video bağlantısı (https://...)')
+        .setRequired(true)
+    )
+    .addStringOption(o =>
+      o
+        .setName('baslik')
+        .setDescription('İsteğe bağlı video/bildirim başlığı')
+        .setRequired(false)
+    )
+    .addStringOption(o =>
+      o
+        .setName('kanal_adi')
+        .setDescription('İsteğe bağlı kanal veya profil adı (örn. @ArzoLX)')
+        .setRequired(false)
+    )
 ].map(c => c.toJSON());
 
 const client = new Client({
@@ -479,8 +536,62 @@ client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand() || !interaction.guild) return;
   try {
     const command = interaction.commandName;
-    if (['tik-ver', 'tik-sil', 'terfi', 'tik-gecmisi'].includes(command) && !isStaff(interaction.member)) {
+    if (
+      ['tik-ver', 'tik-sil', 'terfi', 'tik-gecmisi', 'bildirim-gonder'].includes(command) &&
+      !isStaff(interaction.member)
+    ) {
       return await interaction.reply({ content: 'Bu komut yalnızca yönetim içindir.', flags: MessageFlags.Ephemeral });
+    }
+
+    if (command === 'bildirim-gonder') {
+      const platform = interaction.options.getString('platform');
+      const url = interaction.options.getString('baglanti').trim();
+      const customTitle = interaction.options.getString('baslik')?.trim() || '';
+      const customChannel = interaction.options.getString('kanal_adi')?.trim() || '';
+
+      if (!isValidHttpUrl(url)) {
+        return await interaction.reply({
+          content: 'Geçerli bir bağlantı girin (`https://...` ile başlamalıdır).',
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      const channel = await getNotificationChannel();
+      if (!channel) {
+        return await interaction.reply({
+          content: `Bildirim kanalı (\`${NOTIFICATION_CHANNEL_ID}\`) bulunamadı veya metin kanalı değil.`,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      let embed;
+      if (platform === 'youtube') {
+        const channelLabel = customChannel || `@${YOUTUBE_HANDLE}`;
+        const videoId = extractYouTubeVideoId(url);
+        embed = new EmbedBuilder()
+          .setTitle(customTitle || 'Yeni YouTube Videosu')
+          .setURL(url)
+          .setAuthor({ name: `${channelLabel} yeni video paylaştı!` })
+          .setColor(0xFF0000)
+          .setTimestamp();
+        if (videoId) {
+          embed.setImage(`https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`);
+        }
+      } else {
+        const handleClean = (customChannel || 'TikTok').replace(/^@+/, '');
+        embed = new EmbedBuilder()
+          .setTitle(customTitle || `@${handleClean} yeni TikTok videosu paylaştı!`)
+          .setURL(url)
+          .setDescription(`[Videoyu İzle](${url})`)
+          .setColor(0x111111)
+          .setTimestamp();
+      }
+
+      await sendVideoNotification(channel, embed);
+      return await interaction.reply({
+        content: `✅ Bildirim <#${channel.id}> kanalına gönderildi.`,
+        flags: MessageFlags.Ephemeral
+      });
     }
 
     if (command === 'tik-ver' || command === 'tik-sil' || command === 'terfi') {
